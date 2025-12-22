@@ -1,0 +1,83 @@
+import streamlit as st
+import psycopg2
+
+# Konfiguracja połączenia (najlepiej trzymać to w st.secrets na Streamlit Cloud)
+def get_connection():
+    return psycopg2.connect(
+        host="TWOJ_HOST",
+        database="TWOJA_NAZWA_BAZY",
+        user="TWOJ_USER",
+        password="TWOJE_HASLO",
+        port="5432"
+    )
+
+st.title("Zarządzanie Półproduktami 🏭")
+
+menu = ["Dodaj Kategorię", "Dodaj Półprodukt", "Podgląd Bazy"]
+choice = st.sidebar.selectbox("Menu", menu)
+
+# --- DODAWANIE KATEGORII ---
+if choice == "Dodaj Kategorię":
+    st.subheader("Nowa Kategoria")
+    with st.form("form_kat"):
+        nazwa_kat = st.text_input("Nazwa Kategorii")
+        opis_kat = st.text_area("Opis")
+        submit = st.form_submit_button("Dodaj")
+
+        if submit:
+            conn = get_connection()
+            cur = conn.cursor()
+            cur.execute("INSERT INTO kategorie (nazwa, opis) VALUES (%s, %s)", (nazwa_kat, opis_kat))
+            conn.commit()
+            cur.close()
+            conn.close()
+            st.success(f"Dodano kategorię: {nazwa_kat}")
+
+# --- DODAWANIE PÓŁPRODUKTU ---
+elif choice == "Dodaj Półprodukt":
+    st.subheader("Nowy Półprodukt")
+    
+    # Pobranie kategorii do selectboxa
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT id, nazwa FROM kategorie")
+    kategorie = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    kat_dict = {k[1]: k[0] for k in kategorie}
+
+    with st.form("form_prod"):
+        nazwa = st.text_input("Nazwa Półproduktu")
+        liczba = st.number_input("Liczba", min_value=0, step=1)
+        cena = st.number_input("Cena", min_value=0.0, format="%.2f")
+        wybrana_kat = st.selectbox("Kategoria", list(kat_dict.keys()))
+        
+        submit = st.form_submit_button("Dodaj produkt")
+
+        if submit:
+            conn = get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO polprodukt (nazwa, liczba, cena, kategoria_id) VALUES (%s, %s, %s, %s)",
+                (nazwa, liczba, cena, kat_dict[wybrana_kat])
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+            st.success(f"Dodano produkt: {nazwa}")
+
+# --- PODGLĄD ---
+elif choice == "Podgląd Bazy":
+    st.subheader("Aktualny stan magazynu")
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT p.id, p.nazwa, p.liczba, p.cena, k.nazwa 
+        FROM polprodukt p 
+        JOIN kategorie k ON p.kategoria_id = k.id
+    """)
+    data = cur.fetchall()
+    st.table(data)
+    cur.close()
+    conn.close()

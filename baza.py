@@ -20,7 +20,8 @@ def get_categories():
     return res.data
 
 def get_products():
-    res = supabase.table("Półprodukt").select("nazwa, liczba, cena, kategorie(nazwa)").execute()
+    # Pobieramy id, nazwe, liczbe, cene oraz nazwe powiazanej kategorii
+    res = supabase.table("Półprodukt").select("id, nazwa, liczba, cena, kategorie(nazwa)").execute()
     return res.data
 
 # --- GŁÓWNA NAWIGACJA (TABS) ---
@@ -37,6 +38,7 @@ with tab_dashboard:
     
     if data:
         df = pd.DataFrame(data)
+        # Mapowanie nazwy kategorii z relacji
         if 'kategorie' in df.columns:
             df['kategoria_nazwa'] = df['kategorie'].apply(lambda x: x['nazwa'] if isinstance(x, dict) else "Brak")
         
@@ -53,51 +55,74 @@ with tab_dashboard:
         st.subheader("Podgląd wszystkich danych")
         st.dataframe(df[["nazwa", "liczba", "cena", "kategoria_nazwa"]], use_container_width=True)
     else:
-        st.info("Brak produktów w bazie.")
+        st.info("Brak produktów w bazie. Dodaj coś w zakładce 'Zarządzanie Produktami'.")
 
 # --- ZAKŁADKA 2: ZARZĄDZANIE PRODUKTAMI ---
 with tab_produkty:
-    st.header("Zarządzanie Półproduktami")
-    kategorie_data = get_categories()
-    
-    if not kategorie_data:
-        st.warning("Najpierw dodaj kategorię w sekcji 'Kategorie'!")
-    else:
-        opcje_kat = {k['nazwa']: k['id'] for k in kategorie_data}
+    col_prod_add, col_prod_del = st.columns(2)
+
+    # --- DODAWANIE PRODUKTU ---
+    with col_prod_add:
+        st.subheader("➕ Dodaj nowy półprodukt")
+        kategorie_data = get_categories()
         
-        with st.form("form_prod", clear_on_submit=True):
-            col_n, col_k = st.columns([2, 1])
-            nazwa_prod = col_n.text_input("Nazwa półproduktu")
-            kat_nazwa = col_k.selectbox("Kategoria", options=list(opcje_kat.keys()))
+        if not kategorie_data:
+            st.warning("Najpierw dodaj kategorię w sekcji 'Kategorie'!")
+        else:
+            opcje_kat = {k['nazwa']: k['id'] for k in kategorie_data}
             
-            c1, c2 = st.columns(2)
-            liczba = c1.number_input("Ilość", min_value=0, step=1)
-            cena = c2.number_input("Cena (PLN)", min_value=0.0, format="%.2f")
+            with st.form("form_prod_add", clear_on_submit=True):
+                nazwa_prod = st.text_input("Nazwa półproduktu")
+                kat_nazwa = st.selectbox("Kategoria", options=list(opcje_kat.keys()))
+                c1, c2 = st.columns(2)
+                liczba = c1.number_input("Ilość", min_value=0, step=1)
+                cena = c2.number_input("Cena (PLN)", min_value=0.0, format="%.2f")
+                
+                submit_add = st.form_submit_button("Dodaj do bazy")
+                
+                if submit_add and nazwa_prod:
+                    try:
+                        payload = {
+                            "nazwa": nazwa_prod,
+                            "liczba": liczba,
+                            "cena": cena,
+                            "kategoria_id": opcje_kat[kat_nazwa]
+                        }
+                        supabase.table("Półprodukt").insert(payload).execute()
+                        st.success(f"Dodano: {nazwa_prod}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Błąd: {e}")
+
+    # --- USUWANIE PRODUKTU ---
+    with col_prod_del:
+        st.subheader("🗑️ Usuń produkt")
+        produkty_data = get_products()
+        
+        if produkty_data:
+            # Tworzymy listę produktów do wyboru (Nazwa - ID)
+            opcje_prod = {f"{p['nazwa']} (ID: {p['id']})": p['id'] for p in produkty_data}
+            prod_to_del_label = st.selectbox("Wybierz produkt do usunięcia", options=list(opcje_prod.keys()))
             
-            submit = st.form_submit_button("➕ Dodaj do magazynu")
-            
-            if submit and nazwa_prod:
+            if st.button("Usuń produkt", type="primary", use_container_width=True):
+                target_id = opcje_prod[prod_to_del_label]
                 try:
-                    payload = {
-                        "nazwa": nazwa_prod,
-                        "liczba": liczba,
-                        "cena": cena,
-                        "kategoria_id": opcje_kat[kat_nazwa]
-                    }
-                    supabase.table("Półprodukt").insert(payload).execute()
-                    st.success(f"Dodano: {nazwa_prod}")
+                    supabase.table("Półprodukt").delete().eq("id", target_id).execute()
+                    st.success(f"Pomyślnie usunięto produkt!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Błąd: {e}")
+                    st.error(f"Błąd podczas usuwania: {e}")
+        else:
+            st.info("Brak produktów do usunięcia.")
 
 # --- ZAKŁADKA 3: KATEGORIE ---
 with tab_kategorie:
-    col_left, col_right = st.columns(2)
+    col_kat_add, col_kat_del = st.columns(2)
 
-    # Lewa kolumna: DODAWANIE
-    with col_left:
+    # --- DODAWANIE KATEGORII ---
+    with col_kat_add:
         st.subheader("➕ Dodaj nową kategorię")
-        with st.form("form_kat", clear_on_submit=True):
+        with st.form("form_kat_add", clear_on_submit=True):
             nowa_kat = st.text_input("Nazwa kategorii")
             opis_kat = st.text_area("Opis")
             kat_submit = st.form_submit_button("Zapisz kategorię")
@@ -110,8 +135,8 @@ with tab_kategorie:
                 except Exception as e:
                     st.error(f"Błąd: {e}")
 
-    # Prawa kolumna: USUWANIE
-    with col_right:
+    # --- USUWANIE KATEGORII ---
+    with col_kat_del:
         st.subheader("🗑️ Usuń kategorię")
         current_kats = get_categories()
         
@@ -119,18 +144,16 @@ with tab_kategorie:
             delete_options = {k['nazwa']: k['id'] for k in current_kats}
             kat_to_del_name = st.selectbox("Wybierz kategorię do usunięcia", options=list(delete_options.keys()))
             
-            # Przycisk usuwania z dodatkowym potwierdzeniem
-            if st.button("Usuń wybraną kategorię", type="primary", use_container_width=True):
+            if st.button("Usuń kategorię", type="primary", use_container_width=True):
                 target_id = delete_options[kat_to_del_name]
                 try:
-                    # Próba usunięcia z bazy
                     supabase.table("kategorie").delete().eq("id", target_id).execute()
-                    st.success(f"Pomyślnie usunięto kategorię: {kat_to_del_name}")
+                    st.success(f"Usunięto kategorię: {kat_to_del_name}")
                     st.rerun()
                 except Exception as e:
-                    st.error("Nie można usunąć! Ta kategoria prawdopodobnie zawiera przypisane produkty. Najpierw usuń produkty, a potem kategorię.")
+                    st.error("Nie można usunąć! Kategoria zawiera produkty.")
         else:
-            st.info("Brak kategorii do usunięcia.")
+            st.info("Brak kategorii.")
 
     st.divider()
     st.subheader("📋 Lista wszystkich kategorii")
